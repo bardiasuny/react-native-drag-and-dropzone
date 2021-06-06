@@ -18,12 +18,15 @@ import Animated, {
   withDecay,
   withSpring,
   withTiming,
-  interpolateColors,
+  interpolateColor,
+  runOnUI,
+  useAnimatedReaction,
+  interpolate,
 } from 'react-native-reanimated';
 import {clamp} from 'react-native-redash';
 import {SCREEN_HEIGHT, SCREEN_WIDTH} from '../config';
 import moment from 'moment';
-import {get, isEqual, keys, parseInt, values} from 'lodash';
+import {floor, get, isEqual, keys, parseInt, values} from 'lodash';
 import {
   CALENDAR_BACKGROUND,
   CALENDAR_ACTIVE_BACKGROUND,
@@ -48,6 +51,13 @@ export default () => {
   const activeTranslateY = useSharedValue(0);
 
   const isActiveGlobal = useSharedValue(false);
+
+  const globalDroped = useSharedValue(false);
+
+  const droppedRow = useSharedValue(null);
+  const droppedSessionIndex = useSharedValue(null);
+
+  const activeHoveringRowIndex = useSharedValue(-1);
 
   const indexCalendar = useSharedValue(0);
 
@@ -79,44 +89,22 @@ export default () => {
         return {
           id: date.unix(),
           date: date.format('ddd - DD MMMM YY'),
-          session: Array(i)
-            .fill()
-            .map((_, index) => {
-              return {
-                name: sessionName[index],
-                id: `${i}-${index}-${sessionName[index]}`,
-                rowIndex: i,
-              };
-            }),
+          session:
+            i % 3 !== 0
+              ? Array(i < 3 ? i + 1 : i - 1)
+                  .fill()
+                  .map((_, index) => {
+                    return {
+                      name: sessionName[index],
+                      id: `${i}-${index}-${sessionName[index]}`,
+                      rowIndex: i,
+                    };
+                  })
+              : [],
         };
       }),
     );
   }, []);
-
-  const settingText = date => {
-    setStateText(date);
-  };
-
-  const onDrop = useCallback(
-    event => {
-      'worklet';
-      const sd = Object.values(layout).findIndex(
-        item =>
-          activeTranslateX.value > item.y - CARD_HEIGHT / 2 &&
-          activeTranslateX.value < item.y - CARD_HEIGHT / 2 + item.height,
-      );
-      if (!isActive.value) {
-        activeTranslateX.value = layout[sd]
-          ? layout[sd].y + 10
-          : activeTranslateX.value;
-        activeTranslateY.value = layout[sd]
-          ? SCREEN_WIDTH / 2 - CARD_WIDTH / 2
-          : translateX.value;
-      }
-      runOnJS(settingText)(calendar && calendar[sd] ? calendar[sd].date : null);
-    },
-    [layout, calendar, isActive.value, translateY, translateX],
-  );
 
   const scrollTranslateX = useSharedValue(0);
   const scrollTranslateY = useSharedValue(0);
@@ -150,20 +138,14 @@ export default () => {
   const activeRowIndex = useSharedValue(0);
   const activeSessionIndex = useSharedValue(0);
 
-  console.log('activeRowIndex', activeRowIndex.value, activeSessionIndex.value);
-
-  const onStartDrag = (rowIndex, sessionIndex) => {
-    console.log(
-      'activeRowIndex',
-      get(calendar, `${rowIndex}.session.${sessionIndex}`),
-    );
-    setActiveRowIndex(rowIndex);
-    setActiveSessionIndex(sessionIndex);
-  };
-
   const setTheCalendar = (newCalendar, sd) => {
+    droppedSessionIndex.value = newCalendar[sd].session.length;
+
+    console.log(
+      'newCalendar[sd].session.length',
+      newCalendar[sd].session.length,
+    );
     newCalendar[sd] &&
-      newCalendar[sd].session &&
       newCalendar[sd].session.push(
         calendar[activeRowIndex.value].session[activeSessionIndex.value],
       );
@@ -177,26 +159,30 @@ export default () => {
   const onDropSession = useCallback(
     (event, sd) => {
       'worklet';
+      const newCalendar = [...calendar];
 
-      if (
-        (!isActiveGlobal.value &&
-          activeSessionIndex.value &&
-          activeRowIndex.value,
-        sd)
-      ) {
-        const newCalendar = [...calendar];
-
-        if (parseInt(sd) > -1) {
-          runOnJS(setTheCalendar)(newCalendar, sd);
-        } else {
-          runOnJS(setTheCalendar)(newCalendar, activeRowIndex.value);
-        }
+      if (parseInt(sd) > -1) {
+        runOnJS(setTheCalendar)(newCalendar, sd);
+      } else {
+        runOnJS(setTheCalendar)(newCalendar, activeRowIndex.value);
       }
-      //runOnJS(settingText)(calendar && calendar[sd] ? calendar[sd].date : null);
-      //runOnJS(onStartDrag)(null, null)
     },
-    [layout, calendar, isActive.value, translateY, translateX],
+    [
+      calendar,
+      droppedSessionIndex,
+      isActiveGlobal.value,
+      activeSessionIndex.value,
+      activeRowIndex.value,
+    ],
   );
+
+  const onStartDrag = (row, session) => {
+    setStateText(`row: ${row}, Session: ${session}`);
+  };
+
+  const onMove = index => {
+    setStateText(`row: ${index}, Session: ${index}`);
+  };
 
   //   const sessions = useMemo(() => {
   //    if(calendar && calendar.length) {
@@ -206,6 +192,7 @@ export default () => {
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      <Text>{stateText}</Text>
       {calendar.map((day, index) => (
         <CalendarRow
           key={day.id}
@@ -213,7 +200,6 @@ export default () => {
           setLayout={setLayout}
           layoutUI={layoutUI}
           index={index}
-          layout={layout}
           translateY={translateY}
           translateX={translateX}
           isActive={isActive}
@@ -236,7 +222,6 @@ export default () => {
                 day={day}
                 sess={sess}
                 rowIndex={index}
-                layout={layout}
                 layoutUI={layoutUI}
                 sessionIndex={i}
                 activeTranslateX={activeTranslateX}
@@ -245,10 +230,17 @@ export default () => {
                 scrollTranslateX={scrollTranslateX}
                 scrollTranslateY={scrollTranslateY}
                 isScrollActive={isScrollActive}
-                onStartDrag={onStartDrag}
                 onDropSession={onDropSession}
                 activeRowIndex={activeRowIndex}
                 activeSessionIndex={activeSessionIndex}
+                globalDroped={globalDroped}
+                droppedRow={droppedRow}
+                droppedSessionIndex={droppedSessionIndex}
+                onStartDrag={onStartDrag}
+                activeHoveringRowIndex={activeHoveringRowIndex}
+                setStateText={setStateText}
+                calendar={calendar}
+                onMove={onMove}
               />
             ))}
         </Fragment>
@@ -269,7 +261,6 @@ const SessionCards = ({
   day,
   sess,
   rowIndex,
-  layout,
   layoutUI,
   sessionIndex,
   activeTranslateX,
@@ -282,70 +273,99 @@ const SessionCards = ({
   onDropSession,
   activeRowIndex,
   activeSessionIndex,
+  globalDroped,
+  droppedRow,
+  droppedSessionIndex,
+  activeHoveringRowIndex,
+  setStateText,
+  onMove,
 }) => {
   const isActive = useSharedValue(false);
-  const translateX = useSharedValue(get(layout, `${[rowIndex]}.x`, 0));
-  const translateY = useSharedValue(get(layout, `${[rowIndex]}.y`, 0));
-
-  const [thisLayoutX] = useState(get(layout, `${[rowIndex]}.x`, 0));
-  const [thisLayoutY] = useState(get(layout, `${[rowIndex]}.y`, 0));
-  const thisLayoutHeight = get(layout, `${[rowIndex]}.height`, 0);
+  const translateX = useSharedValue(get(layoutUI.value, `${[rowIndex]}.x`, 0));
+  const translateY = useSharedValue(get(layoutUI.value, `${[rowIndex]}.y`, 0));
 
   const opacityOndrop = useSharedValue(0);
 
-  // useEffect(() => {
-  //   if (sessionIndex === activeSessionIndex.value) {
-  //     (translateX.value = thisLayoutX + CARD_WIDTH_PADDING * sessionIndex + 10),
-  //       (translateY.value = withTiming(get(layout, `${[rowIndex]}.y`, 0) + 38));
-  //   }
-  // }, [layout, rowIndex, sessionIndex, translateX, translateY]);
-  const firstLAyour = useSharedValue(true);
-  useLayoutEffect(() => {
-    'worklet';
-    if (values(layout).length > 0 && rowIndex) {
+  //const firstLAyour = useSharedValue(true);
+
+  useAnimatedReaction(
+    () => {
+      return Object.values(layoutUI.value).length > 6;
+    },
+    data => {
       opacityOndrop.value = 1;
-      firstLAyour.value = false;
+      // data holds what was returned from the first worklet's execution
+      if (data) {
+        // firstLAyour.value = false;
+        // globalDroped.value = false;
+        if (
+          droppedSessionIndex.value !== null &&
+          droppedRow.value === rowIndex &&
+          droppedSessionIndex.value === sessionIndex
+        ) {
+          translateX.value = activeTranslateX.value;
+          translateY.value = activeTranslateY.value;
+          droppedSessionIndex.value = null;
+        }
 
-      if (rowIndex !== activeRowIndex.value || isActive.value) {
-        translateX.value = activeTranslateX.value;
-        translateY.value = activeTranslateY.value;
+        const layoutX =
+          layoutUI.value &&
+          layoutUI.value[rowIndex] &&
+          layoutUI.value[rowIndex].x &&
+          layoutUI.value[rowIndex].x;
+
+        translateX.value = withTiming(
+          layoutX + CARD_WIDTH_PADDING * sessionIndex + 10,
+        );
+
+        const layoutY =
+          layoutUI.value &&
+          layoutUI.value[rowIndex] &&
+          layoutUI.value[rowIndex].y &&
+          layoutUI.value[rowIndex].y;
+
+        translateY.value = withTiming(layoutY + 38);
       }
+    },
+  );
 
-      translateX.value = withTiming(
-        thisLayoutX + CARD_WIDTH_PADDING * sessionIndex + 10,
-      );
+  // useDerivedValue(() => {
+  //   if (
+  //     Object.values(layoutUI.value).length > 6 &&
+  //     (firstLAyour.value || globalDroped.value)
+  //   ) {
+  //     firstLAyour.value = false;
+  //     globalDroped.value = false;
+  //     // translateX.value = activeTranslateX.value;
+  //     // translateY.value = activeTranslateY.value;
 
-      translateY.value = withTiming(get(layout, `${[rowIndex]}.y`, 0) + 38);
-    }
-  }, [
-    get(layout, `${[rowIndex]}.x`),
-    get(layout, `${[rowIndex]}.y`),
-    sessionIndex,
-    isActive.value,
-  ]);
+  //     opacityOndrop.value = 1;
+
+  //     const layoutX =
+  //       layoutUI.value &&
+  //       layoutUI.value[rowIndex] &&
+  //       layoutUI.value[rowIndex].x &&
+  //       layoutUI.value[rowIndex].x;
+
+  //     translateX.value = layoutX + CARD_WIDTH_PADDING * sessionIndex + 10;
+
+  //     const layoutY =
+  //       layoutUI.value &&
+  //       layoutUI.value[rowIndex] &&
+  //       layoutUI.value[rowIndex].y &&
+  //       layoutUI.value[rowIndex].y;
+
+  //     translateY.value = layoutY + 38;
+  //   }
+  // }, [sessionIndex]);
 
   useDerivedValue(() => {
-    console.log('layoutUIlayoutUI', layoutUI);
-    // if (Object.values(layoutUI.value).length > 0 && rowIndex) {
-    //   opacityOndrop.value = 1;
-    //   firstLAyour.value = false;
+    const layoutX =
+      layoutUI.value &&
+      layoutUI.value[rowIndex] &&
+      layoutUI.value[rowIndex].x &&
+      layoutUI.value[rowIndex].x;
 
-    //   if (rowIndex !== activeRowIndex.value || isActive.value) {
-    //     translateX.value = activeTranslateX.value;
-    //     translateY.value = activeTranslateY.value;
-    //   }
-
-    //   translateX.value = withTiming(
-    //     thisLayoutX + CARD_WIDTH_PADDING * sessionIndex + 10,
-    //   );
-
-    //   const layoutY =
-    //     layoutUI.value && layoutUI.value[rowIndex] && layoutUI.value[rowIndex].y
-    //       ? layoutUI.value[rowIndex].y
-    //       : 0;
-
-    //   translateY.value = withTiming(layoutY + 38);
-    // }
     if (
       sessionIndex > activeSessionIndex.value &&
       rowIndex === activeRowIndex.value &&
@@ -353,67 +373,72 @@ const SessionCards = ({
       !isActive.value
     ) {
       translateX.value = withTiming(
-        thisLayoutX +
-          CARD_WIDTH_PADDING * sessionIndex +
-          10 -
-          CARD_WIDTH_PADDING,
+        layoutX + CARD_WIDTH_PADDING * sessionIndex + 10 - CARD_WIDTH_PADDING,
       );
     }
-    if (
-      scrollTranslateY.value > thisLayoutY &&
-      scrollTranslateY.value < thisLayoutY + thisLayoutHeight &&
-      isActive.value
-    ) {
-      translateX.value =
-        thisLayoutX +
-        CARD_WIDTH_PADDING * sessionIndex +
-        10 +
-        scrollTranslateX.value;
-    }
+    // if (
+    //   scrollTranslateY.value > thisLayoutY &&
+    //   scrollTranslateY.value < thisLayoutY + thisLayoutHeight &&
+    //   isActive.value
+    // ) {
+    //   translateX.value =
+    //     thisLayoutX +
+    //     CARD_WIDTH_PADDING * sessionIndex +
+    //     10 +
+    //     scrollTranslateX.value;
+    // }
   });
 
   const onGestureEvent = useAnimatedGestureHandler({
     onStart: (event, ctx) => {
       //opacityOndrop.value = 1;
+      isActiveGlobal.value = true;
+      isActive.value = true;
       ctx.offsetX = translateX.value;
       ctx.offsetY = translateY.value;
       activeTranslateX.value = translateX.value;
       activeTranslateY.value = translateY.value;
-      //runOnJS(onStartDrag)(rowIndex, sessionIndex)
+      //runOnJS(onStartDrag)(rowIndex, sessionIndex);
       activeRowIndex.value = rowIndex;
       activeSessionIndex.value = sessionIndex;
     },
     onActive: (event, ctx) => {
-      isActive.value = true;
-      isActiveGlobal.value = true;
       translateX.value = clamp(ctx.offsetX + event.translationX, 0, boundX);
       translateY.value = clamp(ctx.offsetY + event.translationY, 0, boundY);
       //onDrop(event);
       activeTranslateX.value = translateX.value;
       activeTranslateY.value = translateY.value;
-    },
-    onEnd: (event, ctx) => {
-      isActiveGlobal.value = false;
-      isActive.value = false;
-      translateX.value =
-        layout[rowIndex].x + CARD_WIDTH_PADDING * sessionIndex + 10;
-
-      translateY.value = layout[rowIndex].y + 38;
-
-      const sd = Object.values(layout).findIndex(
+      activeHoveringRowIndex.value = Object.values(layoutUI.value).findIndex(
         item =>
           activeTranslateY.value > item.y - CARD_HEIGHT / 2 &&
           activeTranslateY.value < item.y - CARD_HEIGHT / 2 + item.height,
       );
 
-      if (parseInt(sd) > -1) {
-        //console.log('sdsdsdsd', parseInt(sd));
-        translateX.value = activeTranslateX.value;
-        translateY.value = activeTranslateY.value;
-      } else {
-        opacityOndrop.value = 0;
-      }
+      //runOnJS(onMove)(activeHoveringRowIndex.value);
+    },
+    onEnd: (event, ctx) => {
+      isActiveGlobal.value = false;
+
+      isActive.value = false;
+
+      const sd = Object.values(layoutUI.value).findIndex(
+        item =>
+          activeTranslateY.value > item.y - CARD_HEIGHT / 2 &&
+          activeTranslateY.value < item.y - CARD_HEIGHT / 2 + item.height,
+      );
+
+      // if (parseInt(sd) > -1) {
+      //   //console.log('sdsdsdsd', parseInt(sd));
+      //   translateX.value = activeTranslateX.value;
+      //   translateY.value = activeTranslateY.value;
+      // } else {
+      //
+      // }
+      translateX.value = activeTranslateX.value;
+      translateY.value = activeTranslateY.value;
       onDropSession(event, sd);
+      droppedRow.value = sd;
+      //opacityOndrop.value = 0;
     },
   });
   const style = useAnimatedStyle(() => {
@@ -447,7 +472,6 @@ const CalendarRow = ({
   translateY,
   translateX,
   index,
-  layout,
   isActive,
   activeTranslateX,
   activeTranslateY,
@@ -455,45 +479,54 @@ const CalendarRow = ({
   onCalendarGesture,
   activeRowIndex,
 }) => {
-  const bg = useSharedValue(CALENDAR_ACTIVE_BACKGROUND);
+  const bg = useSharedValue(0);
   // const interpolation = interpolateColors(bg.value, {
   //   inputRange: [0, 1],
   //   outputColorRange: [CALENDAR_ACTIVE_BACKGROUND, CALENDAR_BACKGROUND],
   // });
 
-  const backgroundColor = useAnimatedStyle(() => {
-    if (
-      layout[index] &&
-      activeTranslateY.value > layout[index].y - CARD_HEIGHT / 2 &&
-      activeTranslateY.value <
-        layout[index].y - CARD_HEIGHT / 2 + layout[index].height &&
+  const isLayOver = useDerivedValue(() => {
+    const thisLayout = layoutUI.value && layoutUI.value[index];
+    const layoutY = thisLayout && thisLayout.y;
+    const layoutHeight = thisLayout && thisLayout.height;
+
+    const isIt =
+      thisLayout &&
+      activeTranslateY.value > layoutY - CARD_HEIGHT / 2 &&
+      activeTranslateY.value < layoutY - CARD_HEIGHT / 2 + layoutHeight &&
       isActiveGlobal.value &&
-      activeRowIndex.value !== index
-    ) {
-      return {
-        backgroundColor: bg.value,
-        width: SCREEN_WIDTH,
-        height: 100,
-        marginBottom: 20,
-      };
-    } else {
-      return {
-        backgroundColor: CALENDAR_BACKGROUND,
-        width: SCREEN_WIDTH,
-        height: 100,
-        marginBottom: 20,
-      };
-    }
+      activeRowIndex.value !== index;
+
+    return isIt ? withTiming(1, {duration: 0}) : withTiming(0, {duration: 400});
+  });
+
+  // const bgColors = interpolateColor(bg.value, {
+  //   inputRange: [0, 1],
+  //   outputColorRange: [CALENDAR_BACKGROUND, CALENDAR_ACTIVE_BACKGROUND],
+  // });
+
+  const backgroundColor = useAnimatedStyle(() => {
+    const bgdd = interpolateColor(
+      isLayOver.value,
+      [0, 1],
+      [CALENDAR_BACKGROUND, CALENDAR_ACTIVE_BACKGROUND],
+    );
+    return {
+      backgroundColor: bgdd,
+      width: SCREEN_WIDTH,
+      height: 100,
+      marginBottom: 20,
+    };
   });
 
   return (
     <PanGestureHandler>
       <Animated.View
         onLayout={({nativeEvent}) => {
-          setLayout(prevState => ({...prevState, [index]: nativeEvent.layout}));
+          setLayout({b: 1});
           layoutUI.value = {...layoutUI.value, [index]: nativeEvent.layout};
         }}
-        {...{style: backgroundColor}}>
+        style={backgroundColor}>
         <Text style={styles.dateText}>{day.date}</Text>
       </Animated.View>
     </PanGestureHandler>

@@ -6,8 +6,6 @@ import com.facebook.react.ReactActivityDelegate;
 import com.facebook.react.ReactRootView;
 import com.swmansion.gesturehandler.react.RNGestureHandlerEnabledRootView;
 
-import com.facebook.react.bridge.JSIModulePackage; // <- add
-import com.swmansion.reanimated.ReanimatedJSIModulePackage; // <- add
 
 public class MainActivity extends ReactActivity {
 
@@ -28,8 +26,4 @@ public class MainActivity extends ReactActivity {
       }
     };
   }
-  @Override
-      protected JSIModulePackage getJSIModulePackage() {
-        return new ReanimatedJSIModulePackage(); // <- add
-      }
 }

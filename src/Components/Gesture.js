@@ -66,7 +66,7 @@ export default () => {
   const [stateText, setStateText] = useState('h');
 
   const [layout, setLayout] = useState([]);
-  const layoutUI = useSharedValue({});
+  const layoutUI = useRef({});
 
   const [calendar, setCalendar] = useState([]);
   const isActive = useSharedValue(false);
@@ -110,6 +110,16 @@ export default () => {
   const scrollTranslateY = useSharedValue(0);
   const isScrollActive = useSharedValue(false);
 
+  const sessionLength = useDerivedValue(() => {
+    const index = activeHoveringRowIndex.value;
+    return (
+      calendar &&
+      calendar[index] &&
+      calendar[index].session &&
+      calendar[index].session.length
+    );
+  }, [calendar]);
+
   const onCalendarGesture = useAnimatedGestureHandler({
     onStart: (event, ctx) => {
       ctx.offsetX = scrollTranslateX.value;
@@ -139,20 +149,20 @@ export default () => {
   const activeSessionIndex = useSharedValue(0);
 
   const setTheCalendar = (newCalendar, sd) => {
-    droppedSessionIndex.value = newCalendar[sd].session.length;
-
-    console.log(
-      'newCalendar[sd].session.length',
-      newCalendar[sd].session.length,
-    );
-    newCalendar[sd] &&
-      newCalendar[sd].session.push(
-        calendar[activeRowIndex.value].session[activeSessionIndex.value],
+    if (
+      parseInt(sd) > -1
+      // && parseInt(sd) !== activeRowIndex.value
+    ) {
+      droppedSessionIndex.value = newCalendar[sd].session.length;
+      newCalendar[sd] &&
+        newCalendar[sd].session.push(
+          calendar[activeRowIndex.value].session[activeSessionIndex.value],
+        );
+      newCalendar[activeRowIndex.value].session.splice(
+        activeSessionIndex.value,
+        1,
       );
-    newCalendar[activeRowIndex.value].session.splice(
-      activeSessionIndex.value,
-      1,
-    );
+    }
     setCalendar(newCalendar);
   };
 
@@ -160,20 +170,9 @@ export default () => {
     (event, sd) => {
       'worklet';
       const newCalendar = [...calendar];
-
-      if (parseInt(sd) > -1) {
-        runOnJS(setTheCalendar)(newCalendar, sd);
-      } else {
-        runOnJS(setTheCalendar)(newCalendar, activeRowIndex.value);
-      }
+      runOnJS(setTheCalendar)(newCalendar, sd);
     },
-    [
-      calendar,
-      droppedSessionIndex,
-      isActiveGlobal.value,
-      activeSessionIndex.value,
-      activeRowIndex.value,
-    ],
+    [calendar],
   );
 
   const onStartDrag = (row, session) => {
@@ -241,6 +240,7 @@ export default () => {
                 setStateText={setStateText}
                 calendar={calendar}
                 onMove={onMove}
+                sessionLength={sessionLength}
               />
             ))}
         </Fragment>
@@ -279,10 +279,15 @@ const SessionCards = ({
   activeHoveringRowIndex,
   setStateText,
   onMove,
+  sessionLength,
 }) => {
   const isActive = useSharedValue(false);
-  const translateX = useSharedValue(get(layoutUI.value, `${[rowIndex]}.x`, 0));
-  const translateY = useSharedValue(get(layoutUI.value, `${[rowIndex]}.y`, 0));
+  const translateX = useSharedValue(
+    get(layoutUI.current, `${[rowIndex]}.x`, 0),
+  );
+  const translateY = useSharedValue(
+    get(layoutUI.current, `${[rowIndex]}.y`, 0),
+  );
 
   const opacityOndrop = useSharedValue(0);
 
@@ -290,14 +295,15 @@ const SessionCards = ({
 
   useAnimatedReaction(
     () => {
-      return Object.values(layoutUI.value).length > 6;
+      return layoutUI.current && Object.values(layoutUI.current).length > 6;
     },
     data => {
-      opacityOndrop.value = 1;
+      console.log('dataaa', data);
       // data holds what was returned from the first worklet's execution
       if (data) {
         // firstLAyour.value = false;
         // globalDroped.value = false;
+        opacityOndrop.value = 1;
         if (
           droppedSessionIndex.value !== null &&
           droppedRow.value === rowIndex &&
@@ -309,62 +315,141 @@ const SessionCards = ({
         }
 
         const layoutX =
-          layoutUI.value &&
-          layoutUI.value[rowIndex] &&
-          layoutUI.value[rowIndex].x &&
-          layoutUI.value[rowIndex].x;
+          layoutUI.current &&
+          layoutUI.current[rowIndex] &&
+          layoutUI.current[rowIndex].x &&
+          layoutUI.current[rowIndex].x;
 
-        translateX.value = withTiming(
+        translateX.value = withSpring(
           layoutX + CARD_WIDTH_PADDING * sessionIndex + 10,
         );
 
         const layoutY =
-          layoutUI.value &&
-          layoutUI.value[rowIndex] &&
-          layoutUI.value[rowIndex].y &&
-          layoutUI.value[rowIndex].y;
+          layoutUI.current &&
+          layoutUI.current[rowIndex] &&
+          layoutUI.current[rowIndex].y &&
+          layoutUI.current[rowIndex].y;
 
-        translateY.value = withTiming(layoutY + 38);
+        translateY.value = withSpring(layoutY + 38);
       }
     },
   );
 
-  // useDerivedValue(() => {
-  //   if (
-  //     Object.values(layoutUI.value).length > 6 &&
-  //     (firstLAyour.value || globalDroped.value)
-  //   ) {
-  //     firstLAyour.value = false;
-  //     globalDroped.value = false;
-  //     // translateX.value = activeTranslateX.value;
-  //     // translateY.value = activeTranslateY.value;
+  // const sessionLength = useSharedValue(-1);
 
-  //     opacityOndrop.value = 1;
+  useAnimatedReaction(
+    () => {
+      const ac = sessionLength.value;
+      return Math.floor(activeTranslateX.value / CARD_WIDTH_PADDING);
+    },
+    (current, prev) => {
+      if (
+        current !== prev &&
+        activeHoveringRowIndex.value !== rowIndex &&
+        isActiveGlobal.value
+      ) {
+        const layoutX =
+          layoutUI.current &&
+          layoutUI.current[rowIndex] &&
+          layoutUI.current[rowIndex].x &&
+          layoutUI.current[rowIndex].x;
 
-  //     const layoutX =
-  //       layoutUI.value &&
-  //       layoutUI.value[rowIndex] &&
-  //       layoutUI.value[rowIndex].x &&
-  //       layoutUI.value[rowIndex].x;
+        translateX.value = withSpring(
+          layoutX + CARD_WIDTH_PADDING * sessionIndex + 10,
+        );
+      }
+      //console.log('sessionLength.value', sessionLength.value);
+      if (
+        current !== prev &&
+        activeHoveringRowIndex.value === rowIndex &&
+        isActiveGlobal.value &&
+        sessionLength.value
+      ) {
+        console.log('sessionLength.value', current);
+        const layoutX =
+          layoutUI.current &&
+          layoutUI.current[rowIndex] &&
+          layoutUI.current[rowIndex].x &&
+          layoutUI.current[rowIndex].x;
 
-  //     translateX.value = layoutX + CARD_WIDTH_PADDING * sessionIndex + 10;
+        translateX.value = withSpring(
+          layoutX + CARD_WIDTH_PADDING * sessionIndex + 10,
+        );
+        if (
+          rowIndex === activeRowIndex.value
 
-  //     const layoutY =
-  //       layoutUI.value &&
-  //       layoutUI.value[rowIndex] &&
-  //       layoutUI.value[rowIndex].y &&
-  //       layoutUI.value[rowIndex].y;
+          // && sessionLength.value === activeSessionIndex.value + 1
+        ) {
+          const layoutDistance =
+            layoutX + CARD_WIDTH_PADDING * sessionIndex + 10;
 
-  //     translateY.value = layoutY + 38;
-  //   }
-  // }, [sessionIndex]);
+          if (
+            sessionIndex >= current &&
+            activeSessionIndex.value + 1 === sessionLength.value
+          ) {
+            translateX.value = withSpring(layoutDistance + CARD_WIDTH_PADDING);
+          }
+
+          if (
+            sessionIndex >= current &&
+            current < activeSessionIndex.value &&
+            activeSessionIndex.value > sessionIndex
+          ) {
+            translateX.value = withSpring(layoutDistance + CARD_WIDTH_PADDING);
+          }
+          if (
+            current > activeSessionIndex.value &&
+            activeSessionIndex.value < sessionIndex &&
+            current + activeSessionIndex.value >= sessionIndex
+          ) {
+            translateX.value = withSpring(layoutDistance - CARD_WIDTH_PADDING);
+          }
+        }
+        if (
+          rowIndex !== activeRowIndex.value &&
+          sessionIndex >= current
+          // && sessionIndex <= activeSessionIndex.value
+          // && sessionLength.value === activeSessionIndex.value + 1
+        ) {
+          translateX.value = withSpring(
+            layoutX +
+              CARD_WIDTH_PADDING * sessionIndex +
+              10 +
+              CARD_WIDTH_PADDING,
+          );
+        }
+
+        // if (
+        //   sessionIndex >= current &&
+        //   sessionLength.value !== activeSessionIndex.value + 1
+
+        // ) {
+        //   translateX.value = withSpring(
+        //     layoutX +
+        //       CARD_WIDTH_PADDING * sessionIndex +
+        //       10 +
+        //       CARD_WIDTH_PADDING,
+        //   );
+        // }
+
+        if (sessionLength.value < current && sessionIndex <= current) {
+          translateX.value = withSpring(
+            current +
+              CARD_WIDTH_PADDING * sessionIndex +
+              10 +
+              CARD_WIDTH_PADDING,
+          );
+        }
+      }
+    },
+  );
 
   useDerivedValue(() => {
     const layoutX =
-      layoutUI.value &&
-      layoutUI.value[rowIndex] &&
-      layoutUI.value[rowIndex].x &&
-      layoutUI.value[rowIndex].x;
+      layoutUI.current &&
+      layoutUI.current[rowIndex] &&
+      layoutUI.current[rowIndex].x &&
+      layoutUI.current[rowIndex].x;
 
     if (
       sessionIndex > activeSessionIndex.value &&
@@ -372,10 +457,33 @@ const SessionCards = ({
       isActiveGlobal.value &&
       !isActive.value
     ) {
-      translateX.value = withTiming(
-        layoutX + CARD_WIDTH_PADDING * sessionIndex + 10 - CARD_WIDTH_PADDING,
-      );
+      // translateX.value = withTiming(
+      //   layoutX + CARD_WIDTH_PADDING * sessionIndex + 10 - CARD_WIDTH_PADDING,
+      // );
     }
+
+    // console.log(
+    //   'activeRowIndex.value === rowIndex',
+    //   activeHoveringRowIndex.value,
+    // );
+    // if (
+    //   activeHoveringRowIndex.value === rowIndex &&
+    //   sessionIndex !== activeSessionIndex.value
+    // ) {
+    //   const xIndex = Math.floor(activeTranslateX.value / CARD_WIDTH_PADDING);
+    //   console.log('xIndex', xIndex);
+    //   translateX.value = layoutX + CARD_WIDTH_PADDING * sessionIndex + 10;
+
+    //   // if (sessionIndex >= xIndex && activeSessionIndex.value > xIndex) {
+    //   //   translateX.value =
+    //   //     layoutX + CARD_WIDTH_PADDING * sessionIndex + 10 + CARD_WIDTH_PADDING;
+    //   // }
+
+    //   // if (activeSessionIndex.value < xIndex && sessionIndex <= xIndex) {
+    //   //   translateX.value =
+    //   //     layoutX + CARD_WIDTH_PADDING * sessionIndex + 10 + CARD_WIDTH_PADDING;
+    //   // }
+
     // if (
     //   scrollTranslateY.value > thisLayoutY &&
     //   scrollTranslateY.value < thisLayoutY + thisLayoutHeight &&
@@ -408,7 +516,7 @@ const SessionCards = ({
       //onDrop(event);
       activeTranslateX.value = translateX.value;
       activeTranslateY.value = translateY.value;
-      activeHoveringRowIndex.value = Object.values(layoutUI.value).findIndex(
+      activeHoveringRowIndex.value = Object.values(layoutUI.current).findIndex(
         item =>
           activeTranslateY.value > item.y - CARD_HEIGHT / 2 &&
           activeTranslateY.value < item.y - CARD_HEIGHT / 2 + item.height,
@@ -421,7 +529,7 @@ const SessionCards = ({
 
       isActive.value = false;
 
-      const sd = Object.values(layoutUI.value).findIndex(
+      const sd = Object.values(layoutUI.current).findIndex(
         item =>
           activeTranslateY.value > item.y - CARD_HEIGHT / 2 &&
           activeTranslateY.value < item.y - CARD_HEIGHT / 2 + item.height,
@@ -434,8 +542,8 @@ const SessionCards = ({
       // } else {
       //
       // }
-      translateX.value = activeTranslateX.value;
-      translateY.value = activeTranslateY.value;
+      // translateX.value = activeTranslateX.value;
+      // translateY.value = activeTranslateY.value;
       onDropSession(event, sd);
       droppedRow.value = sd;
       //opacityOndrop.value = 0;
@@ -486,7 +594,7 @@ const CalendarRow = ({
   // });
 
   const isLayOver = useDerivedValue(() => {
-    const thisLayout = layoutUI.value && layoutUI.value[index];
+    const thisLayout = layoutUI.current && layoutUI.current[index];
     const layoutY = thisLayout && thisLayout.y;
     const layoutHeight = thisLayout && thisLayout.height;
 
@@ -524,7 +632,7 @@ const CalendarRow = ({
       <Animated.View
         onLayout={({nativeEvent}) => {
           setLayout({b: 1});
-          layoutUI.value = {...layoutUI.value, [index]: nativeEvent.layout};
+          layoutUI.current = {...layoutUI.current, [index]: nativeEvent.layout};
         }}
         style={backgroundColor}>
         <Text style={styles.dateText}>{day.date}</Text>
